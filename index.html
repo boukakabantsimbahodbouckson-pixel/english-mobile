@@ -29,6 +29,7 @@ label{color:var(--mu);font-size:14px;display:flex;gap:6px;align-items:center}
 .line b{color:var(--ac)}
 .fr{color:var(--mu);font-size:15px;margin-top:4px}
 .sp{background:none;border:0;padding:0 6px}
+.bar[hidden]{display:none}
 .bar{position:fixed;left:0;right:0;bottom:0;padding:10px 12px calc(10px + env(safe-area-inset-bottom));background:var(--bg);border-top:1px solid var(--bd);display:flex;gap:8px}
 .bar button{flex:1}
 .bar .main{background:var(--ac);color:#fff;border-color:var(--ac);flex:2}
@@ -56,6 +57,7 @@ const known=new Set(JSON.parse(ls('ot_known','[]')));
 const S={tab:'cards',deck:'all',review:false,i:0,flip:false,order:[],quiz:null,mode:'mc',d:+ls('ot_d',0),fr:true,rate:.9,loop:true,playing:false,cur:-1,tok:0,sh:{i:0,hide:true,playing:false}};
 
 function parse(src){
+  LEX=[];IDI=[];ALL=[];DLG=[];
   const g=n=>{const m=src.match(new RegExp('const '+n+' = `([\\s\\S]*?)`'));if(!m)throw new Error(n+' introuvable');return m[1]};
   LEX=g('LEX').split('\n').map(l=>{const p=l.split('|');return{en:p[0],fr:p[1],ex:''}});
   IDI=g('IDI').split('\n').map(l=>{const p=l.split('|');return{en:p[0],fr:p[1],ex:p[2]||''}});
@@ -70,15 +72,23 @@ function parse(src){
   build(false);render();
 }
 async function load(){
-  for(const f of FILES){try{const r=await fetch(f);if(r.ok)return parse(await r.text())}catch(e){}}
+  const gh=location.hostname.endsWith('github.io');
+  const own=gh?location.hostname.split('.')[0]:'boukakabantsimbahodbouckson-pixel';
+  const rep=gh?location.pathname.split('/')[1]:'english-mobile';
+  const base=gh?location.origin+'/'+rep+'/':location.href.replace(/[^/]*$/,'');
+  const notes=[];
+  const tryUrl=async u=>{
+    try{const r=await fetch(u);if(!r.ok){notes.push(u.split('/').pop()+' : HTTP '+r.status);return false}
+      parse(await r.text());return true}
+    catch(e){notes.push(u.split('/').pop()+' : '+e.message);return false}
+  };
+  for(const f of FILES){if(await tryUrl(base+f))return}
   try{
-    const own=location.hostname.endsWith('github.io')?location.hostname.split('.')[0]:'boukakabantsimbahodbouckson-pixel';const rep=location.hostname.endsWith('github.io')?location.pathname.split('/')[1]:'english-mobile';const r=await fetch('https://api.github.com/repos/'+own+'/'+rep+'/contents/');
-    if(r.ok){
-      const js=(await r.json()).filter(x=>x.type==='file'&&/\.js$/i.test(x.name));
-      for(const x of js){try{const t=await fetch(x.download_url);if(t.ok)return parse(await t.text())}catch(e){}}
-    }
-  }catch(e){}
-  err.textContent='Fichier userscript non trouvé à côté de cette page. Choisis-le :';
+    const r=await fetch('https://api.github.com/repos/'+own+'/'+rep+'/contents/');
+    if(r.ok){for(const x of (await r.json()).filter(x=>x.type==='file'&&/\.js$/i.test(x.name))){if(await tryUrl(x.download_url))return}}
+    else notes.push('API GitHub : HTTP '+r.status);
+  }catch(e){notes.push('API GitHub : '+e.message)}
+  err.innerHTML='Impossible de charger le script.<br><small>'+esc(notes.join(' · '))+'</small><br>Choisis-le :';
   app.innerHTML='<input type="file" id="file" accept=".js,.txt">';
   $('file').onchange=e=>{const rd=new FileReader();rd.onload=()=>{err.textContent='';try{parse(rd.result)}catch(x){err.textContent=x.message}};rd.readAsText(e.target.files[0])};
 }
