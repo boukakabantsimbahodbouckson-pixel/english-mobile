@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>English Training</title>
+<style>
+:root{--bg:#fff;--fg:#1f2328;--mu:#57606a;--bd:#d0d7de;--ac:#22c55e;--hi:#fef9c3;--bt:#f6f8fa;--ok:#dcfce7;--ko:#fee2e2}
+@media(prefers-color-scheme:dark){:root{--bg:#0d1117;--fg:#e6edf3;--mu:#8b949e;--bd:#30363d;--hi:#3b3a12;--bt:#161b22;--ok:#14532d;--ko:#7f1d1d}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:17px/1.45 system-ui,sans-serif;padding:env(safe-area-inset-top) 12px 90px}
+.tabs{display:flex;gap:6px;position:sticky;top:0;background:var(--bg);padding:10px 0;z-index:5}
+.tabs button{flex:1;padding:10px 2px;font-size:14px}
+.tabs .act{background:var(--ac);color:#fff;border-color:var(--ac)}
+select,button,input[type=text]{font:inherit;padding:11px;border:1px solid var(--bd);border-radius:10px;background:var(--bt);color:var(--fg);max-width:100%}
+input[type=text]{width:100%}
+.row{display:flex;gap:8px;margin:8px 0;align-items:center;flex-wrap:wrap}
+.row>button,.row>select{flex:1;min-width:0}
+label{color:var(--mu);font-size:14px;display:flex;gap:6px;align-items:center}
+.mu{color:var(--mu);font-size:14px}
+.card{border:2px solid var(--ac);border-radius:14px;padding:26px 14px;text-align:center;min-height:170px;display:flex;flex-direction:column;justify-content:center;gap:10px;margin:10px 0}
+.card .big{font-size:24px;font-weight:700}
+.card .ex{font-style:italic;color:var(--mu)}
+.opt{display:block;width:100%;text-align:left;margin:8px 0}
+.ok{background:var(--ok)!important;border-color:var(--ac)!important}
+.ko{background:var(--ko)!important;border-color:#ef4444!important}
+.line{padding:10px 8px;border-bottom:1px solid var(--bd);border-radius:8px}
+.line.now{background:var(--hi)}
+.line b{color:var(--ac)}
+.fr{color:var(--mu);font-size:15px;margin-top:4px}
+.sp{background:none;border:0;padding:0 6px}
+.bar{position:fixed;left:0;right:0;bottom:0;padding:10px 12px calc(10px + env(safe-area-inset-bottom));background:var(--bg);border-top:1px solid var(--bd);display:flex;gap:8px}
+.bar button{flex:1}
+.bar .main{background:var(--ac);color:#fff;border-color:var(--ac);flex:2}
+#err{color:#dc2626;font-size:14px}
+</style>
+</head>
+<body>
+<div id="err"></div>
+<div id="app"></div>
+<div class="bar" id="bar" hidden>
+  <button data-a="dprev">◀</button>
+  <button data-a="playall" class="main" id="pa">▶ Tout écouter</button>
+  <button data-a="dnext">▶</button>
+</div>
+<script>
+const FILES=['English-training.user.js','english-training.user.js','English-training.js','script.user.js','userscript.js'];
+const $=id=>document.getElementById(id), app=$('app'), err=$('err');
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const shuffle=a=>{a=a.slice();for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]]}return a};
+const norm=s=>s.toLowerCase().replace(/[^a-zà-ÿ ]/g,' ').replace(/\s+/g,' ').trim();
+const ls=(k,d)=>{try{return localStorage.getItem(k)||d}catch(e){return d}};
+const lsSet=(k,v)=>{try{localStorage.setItem(k,v)}catch(e){}};
+let LEX=[],IDI=[],ALL=[],DLG=[],VOICES=[],timer;
+const known=new Set(JSON.parse(ls('ot_known','[]')));
+const S={tab:'cards',deck:'all',review:false,i:0,flip:false,order:[],quiz:null,mode:'mc',d:+ls('ot_d',0),fr:true,rate:.9,loop:true,playing:false,cur:-1,tok:0,sh:{i:0,hide:true,playing:false}};
+
+function parse(src){
+  const g=n=>{const m=src.match(new RegExp('const '+n+' = `([\\s\\S]*?)`'));if(!m)throw new Error(n+' introuvable');return m[1]};
+  LEX=g('LEX').split('\n').map(l=>{const p=l.split('|');return{en:p[0],fr:p[1],ex:''}});
+  IDI=g('IDI').split('\n').map(l=>{const p=l.split('|');return{en:p[0],fr:p[1],ex:p[2]||''}});
+  ALL=LEX.concat(IDI);
+  let sec='';
+  g('DLG_RAW').split('\n').forEach(l=>{
+    if(l.startsWith('## '))sec=l.slice(3);
+    else if(l.startsWith('# '))DLG.push({s:sec,t:l.slice(2),l:[]});
+    else if(l.trim())DLG[DLG.length-1].l.push(l.split('|'));
+  });
+  if(S.d>=DLG.length)S.d=0;
+  build(false);render();
+}
+async function load(){
+  for(const f of FILES){try{const r=await fetch(f);if(r.ok)return parse(await r.text())}catch(e){}}
+  try{
+    const own=location.hostname.endsWith('github.io')?location.hostname.split('.')[0]:'boukakabantsimbahodbouckson-pixel';const rep=location.hostname.endsWith('github.io')?location.pathname.split('/')[1]:'english-mobile';const r=await fetch('https://api.github.com/repos/'+own+'/'+rep+'/contents/');
+    if(r.ok){
+      const js=(await r.json()).filter(x=>x.type==='file'&&/\.js$/i.test(x.name));
+      for(const x of js){try{const t=await fetch(x.download_url);if(t.ok)return parse(await t.text())}catch(e){}}
+    }
+  }catch(e){}
+  err.textContent='Fichier userscript non trouvé à côté de cette page. Choisis-le :';
+  app.innerHTML='<input type="file" id="file" accept=".js,.txt">';
+  $('file').onchange=e=>{const rd=new FileReader();rd.onload=()=>{err.textContent='';try{parse(rd.result)}catch(x){err.textContent=x.message}};rd.readAsText(e.target.files[0])};
+}
+
+/* voix */
+function pick(){const all=speechSynthesis.getVoices().filter(v=>/^en[-_]/i.test(v.lang));VOICES=all.filter(v=>/^en[-_]US/i.test(v.lang)).concat(all.filter(v=>!/^en[-_]US/i.test(v.lang)))}
+try{pick();speechSynthesis.onvoiceschanged=pick}catch(e){}
+function voiceFor(w){
+  if(!VOICES.length)return null;
+  const m=VOICES.find(v=>/david|mark|guy|male|daniel|alex|james|george|ryan/i.test(v.name));
+  const f=VOICES.find(v=>/zira|female|samantha|aria|jenny|susan|karen|emma|sara/i.test(v.name));
+  return w==='B'?(m||VOICES[Math.min(1,VOICES.length-1)]):(f||VOICES[0]);
+}
+function speak(t,w,end){
+  try{
+    speechSynthesis.cancel();
+    const u=new SpeechSynthesisUtterance(t);u.lang='en-US';u.rate=S.rate;
+    const v=voiceFor(w||'A');if(v)u.voice=v;
+    const single=VOICES.length<2||voiceFor('A')===voiceFor('B');
+    u.pitch=w?(single?(w==='B'?.7:1.25):1):1;
+    if(end)u.onend=end;
+    speechSynthesis.speak(u);
+  }catch(e){if(end)end()}
+}
+function stopAll(){
+  S.playing=false;S.sh.playing=false;S.cur=-1;S.tok++;clearTimeout(timer);
+  try{speechSynthesis.cancel()}catch(e){}
+}
+
+/* cartes */
+function build(re){
+  let it=S.deck==='lex'?LEX:S.deck==='idi'?IDI:ALL;
+  if(S.review)it=it.filter(x=>!known.has(x.en));
+  S.order=re?shuffle(it):it.slice();S.i=0;S.flip=false;
+}
+function vCards(){
+  const c=S.order[S.i];
+  const head=`<div class="row"><select data-a="deck"><option value="all"${S.deck==='all'?' selected':''}>Tout (${ALL.length})</option><option value="lex"${S.deck==='lex'?' selected':''}>Lexique (${LEX.length})</option><option value="idi"${S.deck==='idi'?' selected':''}>Idiomes (${IDI.length})</option></select><button data-a="shuffle">🔀</button></div>
+  <label><input type="checkbox" data-a="review"${S.review?' checked':''}> À revoir seulement</label>`;
+  if(!c)return head+'<p>🎉 Plus rien à revoir. Décoche « À revoir seulement ».</p>';
+  const back=`<div class="big">${esc(c.fr)}</div>${c.ex?`<div class="ex">« ${esc(c.ex)} »</div>`:''}`;
+  return head+`<div class="mu">Carte ${S.i+1} / ${S.order.length} · Connues : ${ALL.filter(x=>known.has(x.en)).length} / ${ALL.length}</div>
+  <div class="card" data-a="flip">${S.flip?back:`<div class="big">${esc(c.en)}</div><div class="mu">Touche pour voir la traduction</div>`}</div>
+  <div class="row"><button data-a="prev">◀</button><button data-a="speak" data-v="${esc(c.ex||c.en)}">🔊</button><button data-a="unk">🔁</button><button data-a="known">✅</button><button data-a="next">▶</button></div>`;
+}
+
+/* quiz */
+function newQ(){
+  const q=ALL[Math.floor(Math.random()*ALL.length)];
+  let mode=S.mode;if(mode==='mix')mode=['mc','listen','type'][Math.floor(Math.random()*3)];
+  const dir=mode==='mc'&&Math.random()<.5, fq=norm(q.fr);
+  const others=shuffle(ALL.filter(x=>x.en!==q.en&&norm(x.fr)!==fq&&!norm(x.fr).includes(fq)&&!fq.includes(norm(x.fr)))).slice(0,3);
+  return{q,dir,mode,opts:shuffle([q].concat(others)),ans:null,ok:null};
+}
+function vQuiz(){
+  const z=S.quiz,best=ls('ot_best','0');
+  const modes=`<div class="row"><select data-a="qmode">${[['mc','Choix multiple'],['listen','Écoute et choisis'],['type','Écris en anglais'],['mix','Mélange']].map(m=>`<option value="${m[0]}"${S.mode===m[0]?' selected':''}>${m[1]}</option>`).join('')}</select></div>`;
+  if(!z)return`<p>Quiz de 10 questions. Meilleur score : <b>${best}/10</b></p>${modes}<button data-a="qstart">▶ Commencer</button>`;
+  if(z.done)return`<p><b>Score : ${z.score} / 10</b> ${z.score>=8?'🏆':z.score>=5?'👍':'💪'} · Meilleur : ${best}/10</p>${modes}<button data-a="qstart">🔁 Rejouer</button>`;
+  const{q,dir,opts,ans,mode,ok}=z.cur,done=ans!==null;
+  const head=`<div class="mu">Question ${z.n+1} / 10 · Score ${z.score}</div>`;
+  const foot=done?`<div class="row"><button data-a="speak" data-v="${esc(q.en)}">🔊</button><button data-a="qnext">Suivant ▶</button></div>`:'';
+  if(mode==='type')return head+`<p><b>Écris en anglais :</b><br><span style="font-size:19px">${esc(q.fr)}</span></p>
+    <input type="text" id="ty" placeholder="Ta réponse..." autocapitalize="off" ${done?'disabled':''} value="${done?esc(z.cur.typed||''):''}">
+    ${done?`<p class="${ok?'ok':'ko'}" style="padding:8px;border-radius:8px">${ok?'✅ Correct !':'❌ Réponse : <b>'+esc(q.en)+'</b>'}</p>`:'<div class="row"><button data-a="qcheck">Valider</button><button data-a="qskip">Je ne sais pas</button></div>'}`+foot;
+  const prompt=mode==='listen'?'<button data-a="speak" data-v="'+esc(q.en)+'" style="font-size:22px">🔊 Écouter</button>':`<span style="font-size:19px">${esc(dir?q.en:q.fr)}</span>`;
+  const label=mode==='listen'?'Écoute et choisis la traduction :':dir?'Traduis en français :':'Comment dit-on en anglais :';
+  return head+`<p><b>${label}</b><br>${prompt}</p>`+opts.map((o,k)=>{
+    const t=(mode==='listen'||dir)?o.fr:o.en;let cl='';
+    if(done)cl=o===q?' ok':(k===ans?' ko':'');
+    return`<button class="opt${cl}" data-a="qans" data-v="${k}"${done?' disabled':''}>${esc(t)}</button>`}).join('')+foot;
+}
+function endQ(z,c){z.cur.ok=c;z.cur.ans=c?0:-1;if(c)z.score++;speak(z.cur.q.en)}
+
+/* dialogues + shadowing */
+function dlgSel(){
+  let o='',sec=null;
+  DLG.forEach((x,k)=>{if(x.s!==sec){if(sec!==null)o+='</optgroup>';o+=`<optgroup label="${esc(x.s)}">`;sec=x.s}o+=`<option value="${k}"${k===S.d?' selected':''}>${esc(x.t)}</option>`});
+  return`<select data-a="dlg">${o}</optgroup></select>`;
+}
+const rateSel=()=>`<select data-a="rate">${[.6,.75,.9,1,1.15].map(v=>`<option value="${v}"${S.rate===v?' selected':''}>×${v}</option>`).join('')}</select>`;
+function vDlg(){
+  const d=DLG[S.d];
+  return dlgSel()+`<div class="row"><label><input type="checkbox" data-a="fr"${S.fr?' checked':''}> Traduction</label><label><input type="checkbox" data-a="loop"${S.loop?' checked':''}> 🔁 Boucle</label>${rateSel()}</div>`+
+  d.l.map((r,k)=>`<div class="line${S.playing&&S.cur===k?' now':''}" id="l${k}"><b>${esc(r[0])}</b> : ${esc(r[1])} <button class="sp" data-a="speakl" data-v="${k}">🔊</button>${S.fr?`<div class="fr">${esc(r[2])}</div>`:''}</div>`).join('');
+}
+function vShadow(){
+  const d=DLG[S.d],sh=S.sh,r=d.l[Math.min(sh.i,d.l.length-1)];
+  return dlgSel()+`<div class="row"><label><input type="checkbox" data-a="hide"${sh.hide?' checked':''}> Cacher le texte</label><label><input type="checkbox" data-a="fr"${S.fr?' checked':''}> Traduction</label>${rateSel()}</div>
+  <div class="mu">Réplique ${sh.i+1} / ${d.l.length} · Personne ${esc(r[0])}</div>
+  <div class="card"><div class="big">${sh.hide?'🎧 Écoute puis répète à voix haute':esc(r[1])}</div><div class="mu">${S.fr?esc(r[2]):''}</div></div>
+  <div class="row"><button data-a="shprev">◀</button><button data-a="shplay">🔊</button><button data-a="shauto">${sh.playing?'⏹ Stop':'⏯ Auto'}</button><button data-a="shnext">▶</button></div>
+  <p class="mu">Auto : la réplique est lue, puis une pause te laisse la répéter.</p>`;
+}
+
+function render(){
+  const t=(id,l)=>`<button data-a="tab" data-v="${id}" class="${S.tab===id?'act':''}">${l}</button>`;
+  app.innerHTML=`<div class="tabs">${t('cards','🃏 Cartes')}${t('quiz','❓ Quiz')}${t('dlg','💬 Dial.')}${t('shadow','🎤 Shadow')}</div>`+
+    (S.tab==='cards'?vCards():S.tab==='quiz'?vQuiz():S.tab==='dlg'?vDlg():vShadow());
+  $('bar').hidden=S.tab!=='dlg';
+  $('pa').textContent=S.playing?'⏹ Stop':'▶ Tout écouter';
+}
+
+/* lecture */
+function step(k,tok){
+  if(!S.playing||tok!==S.tok)return;
+  const d=DLG[S.d];
+  if(k>=d.l.length){if(S.loop)return timer=setTimeout(()=>step(0,tok),1500);stopAll();return render()}
+  S.cur=k;render();
+  const e=$('l'+k);if(e)e.scrollIntoView({block:'center'});
+  speak(d.l[k][1],d.l[k][0],()=>{timer=setTimeout(()=>step(k+1,tok),500)});
+}
+function auto(){
+  if(!S.sh.playing)return;
+  const d=DLG[S.d],r=d.l[S.sh.i];render();
+  speak(r[1],r[0],()=>{
+    if(!S.sh.playing)return;
+    timer=setTimeout(()=>{
+      if(!S.sh.playing)return;
+      if(S.sh.i<d.l.length-1){S.sh.i++;auto()}
+      else{S.sh.i=0;timer=setTimeout(auto,1500)}
+    },Math.max(1500,r[1].length*90/S.rate));
+  });
+}
+
+function act(a,v,el){
+  const c=S.order[S.i],d=DLG[S.d];
+  switch(a){
+    case'tab':stopAll();S.tab=v;break;
+    case'deck':S.deck=el.value;build(false);break;
+    case'review':S.review=el.checked;build(false);break;
+    case'shuffle':build(true);break;
+    case'flip':S.flip=!S.flip;break;
+    case'next':if(S.order.length){S.i=(S.i+1)%S.order.length;S.flip=false}break;
+    case'prev':if(S.order.length){S.i=(S.i-1+S.order.length)%S.order.length;S.flip=false}break;
+    case'known':if(c){known.add(c.en);lsSet('ot_known',JSON.stringify([...known]));if(S.review)build(false);else{S.i=(S.i+1)%S.order.length;S.flip=false}}break;
+    case'unk':if(c){known.delete(c.en);lsSet('ot_known',JSON.stringify([...known]));S.i=(S.i+1)%S.order.length;S.flip=false}break;
+    case'speak':speak(v);return;
+    case'speakl':{const r=d.l[+v];stopAll();speak(r[1],r[0]);render();return}
+    case'qmode':S.mode=el.value;break;
+    case'qstart':S.quiz={n:0,score:0,cur:newQ()};break;
+    case'qans':{const z=S.quiz;if(z.cur.ans===null){z.cur.ans=+v;if(z.cur.opts[+v]===z.cur.q)z.score++;speak(z.cur.q.en)}break}
+    case'qcheck':{const z=S.quiz,i=$('ty');if(z.cur.ans===null&&i){z.cur.typed=i.value;endQ(z,z.cur.q.en.split(' / ').map(norm).includes(norm(i.value))||norm(i.value)===norm(z.cur.q.en))}break}
+    case'qskip':{const z=S.quiz;if(z.cur.ans===null)endQ(z,false);break}
+    case'qnext':{const z=S.quiz;z.n++;if(z.n>=10){z.done=true;if(z.score>+ls('ot_best','0'))lsSet('ot_best',z.score)}else z.cur=newQ();break}
+    case'dlg':stopAll();S.d=+el.value;lsSet('ot_d',S.d);S.sh.i=0;break;
+    case'dprev':stopAll();S.d=(S.d-1+DLG.length)%DLG.length;lsSet('ot_d',S.d);S.sh.i=0;scrollTo(0,0);break;
+    case'dnext':stopAll();S.d=(S.d+1)%DLG.length;lsSet('ot_d',S.d);S.sh.i=0;scrollTo(0,0);break;
+    case'fr':S.fr=el.checked;break;
+    case'loop':S.loop=el.checked;return;
+    case'rate':S.rate=+el.value;return;
+    case'playall':if(S.playing)stopAll();else{stopAll();S.playing=true;step(0,S.tok);return}break;
+    case'hide':S.sh.hide=el.checked;break;
+    case'shplay':{const r=d.l[S.sh.i];speak(r[1],r[0]);return}
+    case'shprev':stopAll();S.sh.i=Math.max(0,S.sh.i-1);break;
+    case'shnext':stopAll();S.sh.i=Math.min(d.l.length-1,S.sh.i+1);break;
+    case'shauto':if(S.sh.playing)stopAll();else{stopAll();S.sh.playing=true;auto();return}break;
+  }
+  render();
+  if((a==='qnext'||a==='qstart')&&S.quiz&&!S.quiz.done&&S.quiz.cur.mode==='listen')speak(S.quiz.cur.q.en);
+}
+document.addEventListener('click',e=>{const t=e.target.closest('[data-a]');if(!t||t.tagName==='SELECT'||t.type==='checkbox')return;act(t.dataset.a,t.dataset.v,t)});
+document.addEventListener('change',e=>{const t=e.target;if(t.dataset&&t.dataset.a&&(t.tagName==='SELECT'||t.type==='checkbox'))act(t.dataset.a,t.value,t)});
+document.addEventListener('keydown',e=>{if(e.key==='Enter'&&e.target.id==='ty')act('qcheck',null,e.target)});
+load();
+</script>
+</body>
+</html>
